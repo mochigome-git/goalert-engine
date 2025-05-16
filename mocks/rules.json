@@ -1,0 +1,36 @@
+[
+  {
+    "id": 1,
+    "topics": ["nk3/holding_register/all/D800"],
+    "table": "logs_temp",
+    "field": "value",
+    "conditions": [
+      {
+        "device": "D800",
+        "operator": "<",
+        "threshold": 1000,
+        "message_template": "{{address}} current: {{value}} is below threshold: {{threshold}}",
+        "level": 1
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "topics": [
+      "nk3/holding_register/all/D800",
+      "nk3/holding_register/all/D392",
+      "nk3/holding_register/all/D166"
+    ],
+    "table": "logs_temp",
+    "field": "value",
+    "conditions": [
+      {
+        "device": "D800",
+        "operator": "D800 < 900 AND D392 == D166 AND D166 != 0",
+        "threshold": 900,
+        "message_template": "{{address}} current: {{value}} is below threshold: {{threshold}}",
+        "level": 3
+      }
+    ]
+  }
+]

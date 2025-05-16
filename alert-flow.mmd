@@ -1,0 +1,5 @@
+graph TD
+A[Alert Engine] -->|Read| B[Cache]
+B -->|Cache Miss| C[(Database)]
+A -->|Write| C
+C -->|Notify| B[Cache Update]
