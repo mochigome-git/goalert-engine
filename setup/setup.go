@@ -3,15 +3,39 @@ package setup
 import (
 	"context"
 	"errors"
+	"fmt"
 	"goalert-engine/alert"
 	"goalert-engine/config"
 	"goalert-engine/mqtts"
 	"goalert-engine/supabase"
+	"os"
 	"sync"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"go.uber.org/zap"
 )
+
+func InitLogger() *zap.Logger {
+	cfg := zap.NewProductionConfig()
+	cfg.EncoderConfig.TimeKey = "" // disable "ts" field
+	cfg.EncoderConfig.MessageKey = "message"
+	cfg.EncoderConfig.LevelKey = "severity"
+
+	logger, err := cfg.Build()
+	if err != nil {
+		panic(fmt.Sprintf("Failed to initialize logger: %v", err))
+	}
+	return logger
+}
+
+func HandleVersionFlag(logger *zap.Logger, version string) bool {
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		logger.Info("GoAlert Engine",
+			zap.String("version", version))
+		return true
+	}
+	return false
+}
 
 func ValidateConfig(cfg config.Config) error {
 	if cfg.MQTTTopic == "" {
@@ -25,15 +49,20 @@ func InitializeServices(
 	cfg config.Config,
 	logger *zap.Logger,
 ) (*alert.RuleManager, *mqtts.Client, error) {
-	inserter := &supabase.SupabaseInserter{}
+	// Initialize MQTT client
 	mqttClient := mqtts.New(cfg)
 
-	loader, err := alert.NewSupabaseRuleLoader(cfg)
+	// Initialize Supabase inserter
+	inserter := &supabase.SupabaseInserter{}
+
+	// Initialize rule loader
+	loader, err := alert.NewSupabaseRuleLoader(cfg, logger)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	rules, err := loader.GetRules(logger)
+	// Load initial rules
+	rules, err := loader.GetRules()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -42,11 +71,21 @@ func InitializeServices(
 		return nil, nil, errors.New("no rules found")
 	}
 
+	manager := alert.NewRuleManager(ctx, rules, cfg, inserter, logger)
+
+	// Start watching for changes and update manager on change
+	err = loader.WatchChanges(ctx, func(updatedRules []alert.AlertRule) {
+		manager.UpdateRules(updatedRules, cfg)
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to start rule realtime listener: %w", err)
+	}
+
 	// Load rules from a file (which contains multiple conditions per rule)
 	// loadedRules := alert.LoadRulesFromFile("mocks/rules.json", logger)
 	// return alert.NewRuleManager(ctx, loadedRules, cfg, inserter, logger), mqttClient, nil
 
-	return alert.NewRuleManager(ctx, rules, cfg, inserter, logger), mqttClient, nil
+	return manager, mqttClient, nil
 }
 
 func MQTTSubscriber(

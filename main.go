@@ -6,42 +6,39 @@ import (
 	"goalert-engine/setup"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 
 	"go.uber.org/zap"
 )
 
-var version = "dev"
+var (
+	version = "dev"
+)
 
 func main() {
-	cfgZap := zap.NewProductionConfig()
-	cfgZap.EncoderConfig.TimeKey = "" // disable "ts" field
-	logger, _ := cfgZap.Build()
-	defer logger.Sync()
-
-	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		logger.Info("GoAlert Engine version", zap.String("version", version))
+	// Initialize logger with better configuration
+	logger := setup.InitLogger()
+	if setup.HandleVersionFlag(logger, version) {
 		return
 	}
 
-	logger.Info("Starting GoAlert engine...")
+	logger.Info("Starting GoAlert engine", zap.String("version", version))
 
+	// Load and validate configuration
 	cfg := config.Load()
 	if err := setup.ValidateConfig(cfg); err != nil {
 		logger.Fatal("Invalid configuration", zap.Error(err))
 	}
 
+	// Set up context with graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ruleManager, mqttClient, err := setup.InitializeServices(ctx, cfg, logger)
-	if err != nil {
-		logger.Fatal("Failed to initialize services", zap.Error(err))
+	// Initialize service manager
+	serviceManager := setup.NewServiceManager(ctx, cfg, logger)
+	if err := serviceManager.Start(); err != nil {
+		logger.Fatal("Failed to start services", zap.Error(err))
 	}
-
-	var wg sync.WaitGroup
-	setup.MQTTSubscriber(ctx, &wg, mqttClient, ruleManager, cfg, logger)
 
 	logger.Info("Service started successfully")
 
@@ -56,8 +53,5 @@ func main() {
 		logger.Info("Context cancelled")
 	}
 
-	logger.Info("Waiting for goroutines to finish...")
-	wg.Wait()
-	mqttClient.Disconnect(250)
 	logger.Info("Shutdown complete")
 }

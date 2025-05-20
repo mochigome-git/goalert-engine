@@ -139,11 +139,14 @@ func (m *RuleManager) HandleMQTTMessage(topic string, payload []byte, cfg config
 	for i := range m.Rules {
 		rule := &m.Rules[i]
 		if slices.Contains(rule.Topics, topic) {
-			if ch, ok := m.ruleChans[rule.ID]; ok {
-				select {
-				case ch <- struct{}{}:
-				default:
-				}
+			ch, ok := m.ruleChans[rule.ID]
+			if !ok {
+				m.logger.Warn("Rule channel missing", zap.Int("ruleID", rule.ID))
+				continue
+			}
+			select {
+			case ch <- struct{}{}:
+			default:
 			}
 		}
 	}
@@ -154,10 +157,10 @@ func (m *RuleManager) evaluateRule(rule *AlertRule, cfg config.Config) {
 	snapshot := m.createRuleSnapshot(rule)
 
 	if snapshot != nil {
-		// m.logger.Info("DEBUG: Evaluating rule",
-		// 	zap.Any("id", rule.ID),
-		// 	zap.Any("payload", snapshot),
-		// )
+		m.logger.Info("DEBUG: Evaluating rule",
+			zap.Any("id", rule.ID),
+			zap.Any("payload", snapshot),
+		)
 
 		for _, condition := range rule.Conditions {
 			triggered, message := rule.Evaluate(snapshot, condition)
@@ -213,6 +216,49 @@ func (m *RuleManager) createRuleSnapshot(rule *AlertRule) map[string]any {
 		return snapshot
 	}
 	return nil
+}
+
+func (m *RuleManager) UpdateRules(newRules []AlertRule, cfg config.Config) {
+	m.logger.Info("Updating rules", zap.Int("newRuleCount", len(newRules)))
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// First cancel old context to shut down old workers
+	m.cancel()
+
+	// Create a new context for new workers
+	m.ctx, m.cancel = context.WithCancel(context.Background())
+
+	// Reset everything from scratch
+	m.Rules = newRules
+	m.ruleChans = make(map[int]chan struct{})
+
+	// Start a worker for each new rule
+	for _, r := range newRules {
+		ch := make(chan struct{}, 1)
+		m.ruleChans[r.ID] = ch
+		go m.ruleWorker(&r, ch, cfg)
+	}
+
+	m.logger.Info("Rules updated and workers restarted", zap.Int("count", len(newRules)))
+}
+
+func (m *RuleManager) ruleWorker(rule *AlertRule, triggerChan chan struct{}, cfg config.Config) {
+	for {
+		select {
+		case <-m.ctx.Done():
+			m.logger.Info("Shutting down rule worker", zap.Int("ruleID", rule.ID))
+			return
+		case <-triggerChan:
+			m.evaluateRule(rule, cfg)
+		}
+	}
+}
+
+func (m *RuleManager) Shutdown() {
+	m.cancel()
+	m.logger.Info("RuleManager shutdown initiated")
 }
 
 func getLevelString(level int) string {
@@ -322,21 +368,4 @@ func extractAddressFromTopic(topic string) string {
 		return ""
 	}
 	return parts[len(parts)-1]
-}
-
-func (m *RuleManager) ruleWorker(rule *AlertRule, triggerChan chan struct{}, cfg config.Config) {
-	for {
-		select {
-		case <-m.ctx.Done():
-			m.logger.Info("Shutting down rule worker", zap.Int("ruleID", rule.ID))
-			return
-		case <-triggerChan:
-			m.evaluateRule(rule, cfg)
-		}
-	}
-}
-
-func (m *RuleManager) Shutdown() {
-	m.cancel()
-	m.logger.Info("RuleManager shutdown initiated")
 }

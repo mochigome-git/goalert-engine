@@ -31,12 +31,17 @@ func Load() Config {
 		fmt.Println("Info: .env.local not found, using system environment variables")
 	}
 
+	schema := os.Getenv("SUPABASE_SCHEMA")
+	if schema == "" {
+		schema = "public"
+	}
+
 	return Config{
 		MQTTBroker:    os.Getenv("MQTT_BROKER"),
 		MQTTTopic:     os.Getenv("MQTT_TOPIC"),
 		SupabaseURL:   os.Getenv("SUPABASE_URL"),
 		SupabaseKey:   os.Getenv("SUPABASE_KEY"),
-		Schema:        os.Getenv("SUPABASE_SCHEMA"),
+		Schema:        schema,
 		TLSCACert:     os.Getenv("TLS_CA_CERT"),
 		TLSClientCert: os.Getenv("TLS_CLIENT_CERT"),
 		TLSClientKey:  os.Getenv("TLS_CLIENT_KEY"),
@@ -49,7 +54,7 @@ func Load() Config {
 			URL:    os.Getenv("SUPABASE_URL"),
 			Key:    os.Getenv("SUPABASE_KEY"),
 			Table:  os.Getenv("SUPABASE_RULES_TABLE"),
-			Schema: os.Getenv("SUPABASE_SCHEMA"),
+			Schema: schema,
 		},
 	}
 }

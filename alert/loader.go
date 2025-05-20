@@ -1,13 +1,18 @@
 package alert
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"goalert-engine/config"
 	"io/ioutil"
 	"log"
+	"net/url"
+	"strings"
 	"time"
+
+	"goalert-engine/realtime" // Import your realtime package
 
 	"github.com/dgraph-io/ristretto"
 	"github.com/supabase-community/supabase-go"
@@ -15,19 +20,29 @@ import (
 )
 
 type SupabaseRuleLoader struct {
-	client    *supabase.Client
-	cache     *ristretto.Cache
-	ttl       time.Duration
-	TableName string
+	client     *supabase.Client
+	cache      *ristretto.Cache
+	ttl        time.Duration
+	TableName  string
+	logger     *zap.Logger
+	realtime   *realtime.Client
+	projectRef string
+	schema     string
 }
 
-func NewSupabaseRuleLoader(cfg config.Config) (*SupabaseRuleLoader, error) {
+func NewSupabaseRuleLoader(cfg config.Config, logger *zap.Logger) (*SupabaseRuleLoader, error) {
 	apiURL := cfg.Supabase.URL
 	apiKey := cfg.Supabase.Key
 	tableName := cfg.Supabase.Table
 	schema := cfg.Supabase.Schema
 
-	// Initialize cache
+	// Extract project reference from URL
+	u, err := url.Parse(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Supabase URL: %w", err)
+	}
+	projectRef := strings.TrimSuffix(strings.TrimPrefix(u.Hostname(), "db."), ".supabase.co")
+
 	cache, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: 1e7,
 		MaxCost:     100,
@@ -37,7 +52,6 @@ func NewSupabaseRuleLoader(cfg config.Config) (*SupabaseRuleLoader, error) {
 		return nil, fmt.Errorf("failed to initialize cache: %w", err)
 	}
 
-	// 👇 Pass schema explicitly
 	client, err := supabase.NewClient(apiURL, apiKey, &supabase.ClientOptions{
 		Schema: schema,
 	})
@@ -45,16 +59,89 @@ func NewSupabaseRuleLoader(cfg config.Config) (*SupabaseRuleLoader, error) {
 		return nil, fmt.Errorf("failed to initialize Supabase client: %w", err)
 	}
 
+	rtClient := realtime.CreateRealtimeClient(projectRef, apiKey, logger)
+
+	// Connect the realtime client
+	if err := rtClient.Connect(); err != nil {
+		return nil, fmt.Errorf("failed to connect to realtime service: %w", err)
+	}
+
 	return &SupabaseRuleLoader{
-		client:    client,
-		cache:     cache,
-		ttl:       5 * time.Minute,
-		TableName: tableName,
+		client:     client,
+		cache:      cache,
+		ttl:        5 * time.Minute,
+		TableName:  tableName,
+		logger:     logger,
+		realtime:   rtClient,
+		projectRef: projectRef,
+		schema:     schema,
 	}, nil
 }
 
-func (s *SupabaseRuleLoader) GetRules(logger *zap.Logger) ([]AlertRule, error) {
-	// Check cache first
+func (s *SupabaseRuleLoader) WatchChanges(ctx context.Context, onUpdate func([]AlertRule)) error {
+	// Subscribe to PostgreSQL changes directly
+	err := s.realtime.ListenToPostgresChanges(realtime.PostgresChangesOptions{
+		Schema: s.schema,
+		Table:  s.TableName,
+		Filter: "*", // Listen to all changes
+	}, func(payload map[string]any) {
+		s.logger.Info("Database change detected",
+			zap.Any("payload", payload))
+
+		// Extract change type and record
+		if data, ok := payload["payload"].(map[string]any); ok {
+			changeType, _ := data["type"].(string)
+
+			var record map[string]any
+
+			if r, ok := data["record"].(map[string]any); ok {
+				record = r
+			} else if or, ok := data["old_record"].(map[string]any); ok {
+				record = or
+			} else {
+				record = nil
+			}
+
+			s.logger.Debug("Change details",
+				zap.String("type", changeType),
+				zap.Any("record", record))
+
+			// Invalidate cache and reload rules on any change event
+			s.cache.Del("all_rules")
+			updatedRules, err := s.GetRules()
+			if err != nil {
+				s.logger.Error("Failed to reload rules after DB change", zap.Error(err))
+				return
+			}
+			onUpdate(updatedRules)
+		}
+
+		// Invalidate cache and reload rules
+		s.cache.Del("all_rules")
+		updatedRules, err := s.GetRules()
+		if err != nil {
+			s.logger.Error("Failed to reload rules", zap.Error(err))
+			return
+		}
+		onUpdate(updatedRules)
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to listen to postgres changes: %w", err)
+	}
+
+	// Handle context cancellation
+	go func() {
+		<-ctx.Done()
+		s.logger.Info("Stopping realtime changes watcher")
+		// The connection will be closed when the client is garbage collected
+		// or you can explicitly call s.realtime.Disconnect() if needed
+	}()
+
+	return nil
+}
+
+func (s *SupabaseRuleLoader) GetRules() ([]AlertRule, error) {
 	if val, ok := s.cache.Get("all_rules"); ok {
 		if rules, ok := val.([]AlertRule); ok {
 			return rules, nil
@@ -62,18 +149,16 @@ func (s *SupabaseRuleLoader) GetRules(logger *zap.Logger) ([]AlertRule, error) {
 		return nil, errors.New("invalid cache type")
 	}
 
-	// Fetch from Supabase
-	rules, err := s.loadFromSupabase(logger)
+	rules, err := s.loadFromSupabase()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load rules: %w", err)
 	}
 
-	// Update cache
 	s.cache.SetWithTTL("all_rules", rules, 1, s.ttl)
 	return rules, nil
 }
 
-func (s *SupabaseRuleLoader) loadFromSupabase(logger *zap.Logger) ([]AlertRule, error) {
+func (s *SupabaseRuleLoader) loadFromSupabase() ([]AlertRule, error) {
 	var dbRules []struct {
 		ID         int              `json:"id"`
 		Topics     []string         `json:"topics"`
@@ -82,13 +167,11 @@ func (s *SupabaseRuleLoader) loadFromSupabase(logger *zap.Logger) ([]AlertRule, 
 		Conditions []AlertCondition `json:"conditions"`
 	}
 
-	// Using Supabase's Go client for query
 	_, err := s.client.From(s.TableName).Select("*", "", false).ExecuteTo(&dbRules)
 	if err != nil {
 		return nil, fmt.Errorf("supabase query failed: %w", err)
 	}
 
-	// Convert to proper AlertRule with initialization
 	rules := make([]AlertRule, len(dbRules))
 	for i, dbRule := range dbRules {
 		rules[i] = *NewAlertRule(
@@ -97,34 +180,20 @@ func (s *SupabaseRuleLoader) loadFromSupabase(logger *zap.Logger) ([]AlertRule, 
 			dbRule.Table,
 			dbRule.Field,
 			dbRule.Conditions,
-			logger,
+			s.logger,
 		)
 	}
 
 	return rules, nil
 }
 
-// func (s *SupabaseRuleLoader) WatchChanges(ctx context.Context) error {
-// 	subscription := s.client.Realtime().
-// 		From(s.tableName).
-// 		On("UPDATE", func(payload map[string]interface{}) {
-// 			s.cache.Del("all_rules")
-// 		}).
-// 		On("INSERT", func(payload map[string]interface{}) {
-// 			s.cache.Del("all_rules")
-// 		}).
-// 		On("DELETE", func(payload map[string]interface{}) {
-// 			s.cache.Del("all_rules")
-// 		}).
-// 		Subscribe()
-//
-// 	go func() {
-// 		<-ctx.Done()
-// 		subscription.Unsubscribe()
-// 	}()
-//
-// 	return nil
-// }
+// Close cleans up resources
+func (s *SupabaseRuleLoader) Close() error {
+	if s.realtime != nil {
+		return s.realtime.Disconnect()
+	}
+	return nil
+}
 
 func LoadRulesFromFile(path string, logger *zap.Logger) []AlertRule {
 	data, err := ioutil.ReadFile(path)
