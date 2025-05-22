@@ -164,6 +164,8 @@ func (s *SupabaseRuleLoader) loadFromSupabase() ([]AlertRule, error) {
 		Topics     []string         `json:"topics"`
 		Table      string           `json:"table"`
 		Field      string           `json:"field"`
+		Category   string           `json:"category"`
+		Machine    string           `json:"machine"`
 		Conditions []AlertCondition `json:"conditions"`
 	}
 
@@ -179,6 +181,8 @@ func (s *SupabaseRuleLoader) loadFromSupabase() ([]AlertRule, error) {
 			dbRule.Topics,
 			dbRule.Table,
 			dbRule.Field,
+			dbRule.Category,
+			dbRule.Machine,
 			dbRule.Conditions,
 			s.logger,
 		)
@@ -206,6 +210,8 @@ func LoadRulesFromFile(path string, logger *zap.Logger) []AlertRule {
 		Topics         []string         `json:"topics"`
 		Table          string           `json:"table"`
 		Field          string           `json:"field"`
+		Category       string           `json:"category"`
+		Machine        string           `json:"machine"`
 		Conditions     []AlertCondition `json:"conditions"`
 		ThrottlePeriod int              `json:"throttle_period"`
 	}
@@ -222,6 +228,8 @@ func LoadRulesFromFile(path string, logger *zap.Logger) []AlertRule {
 			fileRule.Topics,
 			fileRule.Table,
 			fileRule.Field,
+			fileRule.Category,
+			fileRule.Machine,
 			fileRule.Conditions,
 			logger,
 		)

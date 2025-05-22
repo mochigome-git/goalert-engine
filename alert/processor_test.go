@@ -94,17 +94,17 @@ func TestHandleMQTTMessage(t *testing.T) {
 
 // MockSupabaseClient implements the AlertInserter interface for testing
 type MockSupabaseClient struct {
-	InsertAlertFunc func(cfg config.Config, table, device, message string) error
+	InsertAlertFunc func(cfg config.Config, table, device, message, category, machine string) error
 }
 
-func (m *MockSupabaseClient) InsertAlert(cfg config.Config, table, device, message string) error {
-	return m.InsertAlertFunc(cfg, table, device, message)
+func (m *MockSupabaseClient) InsertAlert(cfg config.Config, table, device, message, category, machine string) error {
+	return m.InsertAlertFunc(cfg, table, device, message, category, machine)
 }
 
 func TestEvaluateRule(t *testing.T) {
 	// Create our mock client
 	mockClient := &MockSupabaseClient{
-		InsertAlertFunc: func(cfg config.Config, table, device, message string) error {
+		InsertAlertFunc: func(cfg config.Config, table, device, message, category, machine string) error {
 			if table != "alerts" {
 				t.Errorf("Expected table 'alerts', got '%s'", table)
 			}
@@ -113,6 +113,12 @@ func TestEvaluateRule(t *testing.T) {
 			}
 			if message == "" {
 				t.Error("Expected non-empty message")
+			}
+			if category == "" {
+				t.Error("Expected non-empty category")
+			}
+			if machine == "" {
+				t.Error("Expected non-empty machine")
 			}
 			return nil
 		},

@@ -1,6 +1,7 @@
 package alert
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -22,6 +23,8 @@ type AlertRule struct {
 	Topics         []string          `json:"topics"`
 	Table          string            `json:"table"`
 	Field          string            `json:"field"`
+	Machine        string            `json:"machine"`
+	Category       string            `json:"category"`
 	Conditions     []AlertCondition  `json:"conditions"`
 	LastAlertTime  map[int]time.Time `json:"-"` // Track last alert time for each device
 	CooldownPeriod time.Duration     `json:"-"`
@@ -38,14 +41,24 @@ type AlertCondition struct {
 	Level           int    `json:"level"` // 1=Warning, 2=Error, 3=Critical
 }
 
+type AlertMessage struct {
+	Device    string  `json:"device"`
+	Current   float64 `json:"current"`
+	Threshold float64 `json:"threshold"`
+	Message   string  `json:"message"`
+	Severity  string
+}
+
 // NewAlertRule is used to create a new AlertRule with the given parameters.
-func NewAlertRule(id int, topics []string, table, field string, conditions []AlertCondition, logger *zap.Logger) *AlertRule {
+func NewAlertRule(id int, topics []string, table, field, category, machine string, conditions []AlertCondition, logger *zap.Logger) *AlertRule {
 	return &AlertRule{
 		ID:             id,
 		Topics:         topics,
 		Table:          table,
 		Field:          field,
+		Category:       category,
 		Conditions:     conditions,
+		Machine:        machine,
 		LastAlertTime:  make(map[int]time.Time), // Ensure map initialization here
 		CooldownPeriod: 30 * time.Second,        // For immediate issues
 		logger:         logger,
@@ -267,18 +280,27 @@ func (r *AlertRule) shouldAlert(id int) bool {
 
 // generateAlertMessage creates the formatted alert message
 func (r *AlertRule) generateAlertMessage(condition AlertCondition, value float64) string {
-	message := condition.MessageTemplate
-	message = strings.ReplaceAll(message, "{{value}}", fmt.Sprintf("%d", int(math.Round(value))))
-	message = strings.ReplaceAll(message, "{{address}}", condition.Device)
-	message = strings.ReplaceAll(message, "{{threshold}}", fmt.Sprintf("%d", int(math.Round(float64(condition.Threshold)))))
+	alert := AlertMessage{
+		Device:    condition.Device,
+		Current:   math.Round(value),
+		Threshold: math.Round(float64(condition.Threshold)),
+		Message:   condition.MessageTemplate,
+		Severity:  getLevelString(condition.Level),
+	}
+
+	jsonBytes, err := json.Marshal(alert)
+	if err != nil {
+		r.logger.Warn("Failed to marshal alert message", zap.Error(err))
+		return "{}"
+	}
 
 	// Add severity prefix if not already present
-	if !strings.HasPrefix(message, getLevelString(condition.Level)) {
-		message = fmt.Sprintf("%s: %s", getLevelString(condition.Level), message)
-	}
+	// if !strings.HasPrefix(message, getLevelString(condition.Level)) {
+	// 	message = fmt.Sprintf("%s: %s", getLevelString(condition.Level), message)
+	// }
 
 	// Log for debugging
 	//fmt.Println("Generated message:", strings.ReplaceAll(msg, "{{value}}", fmt.Sprintf("%.2f", val)))
 
-	return message
+	return string(jsonBytes)
 }

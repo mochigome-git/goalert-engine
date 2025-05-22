@@ -14,8 +14,8 @@ import (
 // to implement the alert.AlertInserter interface
 type SupabaseInserter struct{}
 
-func (s *SupabaseInserter) InsertAlert(cfg config.Config, table, device, message string) error {
-	return InsertAlert(cfg, table, device, message)
+func (s *SupabaseInserter) InsertAlert(cfg config.Config, table, device, message, category, machine string) error {
+	return InsertAlert(cfg, table, device, message, category, machine)
 }
 
 // Shared client with connection pooling
@@ -29,7 +29,7 @@ var httpClient = &http.Client{
 	},
 }
 
-func InsertAlert(cfg config.Config, table string, deviceID string, message string) error {
+func InsertAlert(cfg config.Config, table, deviceID, message, category, machine string) error {
 	// Construct REST API endpoint URL
 	url := fmt.Sprintf("%s/rest/v1/%s", cfg.SupabaseURL, table)
 
@@ -37,6 +37,8 @@ func InsertAlert(cfg config.Config, table string, deviceID string, message strin
 	requestBody := map[string]any{
 		"device_id": deviceID,
 		"message":   message,
+		"category":  category,
+		"machine":   machine,
 	}
 
 	body, err := json.Marshal(requestBody)

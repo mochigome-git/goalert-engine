@@ -75,7 +75,7 @@ func TestInsertAlert(t *testing.T) {
 			}
 
 			// Call the function
-			err := InsertAlert(cfg, "alerts", "device123", "test message")
+			err := InsertAlert(cfg, "alerts", "device123", "test message", "coating", "nk")
 
 			// Check errors
 			if tt.expectedError != "" {
@@ -174,7 +174,7 @@ func TestInsertAlertWithMockServer(t *testing.T) {
 			}
 
 			// Call the function
-			err := InsertAlert(cfg, "alerts", "device123", "test message")
+			err := InsertAlert(cfg, "alerts", "device123", "test message", "coating", "nk")
 
 			// Check errors
 			if tt.expectedError != "" {
