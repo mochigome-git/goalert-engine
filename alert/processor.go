@@ -26,7 +26,7 @@ type cacheKey struct {
 }
 
 type AlertInserter interface {
-	InsertAlert(cfg config.Config, table, device, message string) error
+	InsertAlert(cfg config.Config, table, device, message, category, machine string) error
 }
 
 type RuleManager struct {
@@ -157,10 +157,10 @@ func (m *RuleManager) evaluateRule(rule *AlertRule, cfg config.Config) {
 	snapshot := m.createRuleSnapshot(rule)
 
 	if snapshot != nil {
-		m.logger.Info("DEBUG: Evaluating rule",
-			zap.Any("id", rule.ID),
-			zap.Any("payload", snapshot),
-		)
+		// m.logger.Info("DEBUG: Evaluating rule",
+		// 	zap.Any("id", rule.ID),
+		// 	zap.Any("payload", snapshot),
+		// )
 
 		for _, condition := range rule.Conditions {
 			triggered, message := rule.Evaluate(snapshot, condition)
@@ -174,7 +174,7 @@ func (m *RuleManager) evaluateRule(rule *AlertRule, cfg config.Config) {
 						zap.String("message", message),
 					)
 					// Insert the alert into the database
-					err := supabase.InsertAlert(cfg, rule.Table, condition.Device, message)
+					err := supabase.InsertAlert(cfg, rule.Table, condition.Device, message, rule.Category, rule.Machine)
 					if err != nil {
 						m.logger.Error("Failed to insert alert", zap.Error(err))
 					}

@@ -2,14 +2,16 @@
   {
     "id": 1,
     "topics": ["nk3/holding_register/all/D800"],
-    "table": "logs_temp",
+    "table": "logs",
     "field": "value",
+    "category": "coating",
+    "machine": "nk3",
     "conditions": [
       {
         "device": "D800",
         "operator": "<",
         "threshold": 1000,
-        "message_template": "{{address}} current: {{value}} is below threshold: {{threshold}}",
+        "message_template": "is below",
         "level": 1
       }
     ]
@@ -21,15 +23,38 @@
       "nk3/holding_register/all/D392",
       "nk3/holding_register/all/D166"
     ],
-    "table": "logs_temp",
+    "table": "logs",
     "field": "value",
+    "category": "coating",
+    "machine": "nk3",
     "conditions": [
       {
         "device": "D800",
         "operator": "D800 < 900 AND D392 == D166 AND D166 != 0",
         "threshold": 900,
-        "message_template": "{{address}} current: {{value}} is below threshold: {{threshold}}",
+        "message_template": "is below",
         "level": 3
+      }
+    ]
+  },
+  {
+    "id": 4,
+    "topics": [
+      "nk3/holding_register/all/D808",
+      "nk3/holding_register/all/D392",
+      "nk3/holding_register/all/D166"
+    ],
+    "table": "logs",
+    "field": "value",
+    "category": "coating",
+    "machine": "nk3",
+    "conditions": [
+      {
+        "device": "D808",
+        "operator": "D808 > 600 AND D392 == D166 AND D166 != 0",
+        "threshold": 600,
+        "message_template": "is Higher",
+        "level": 2
       }
     ]
   }

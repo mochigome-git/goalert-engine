@@ -42,7 +42,7 @@ go build -o goalert-engine
 
 ## Requirements
 
-- Go 1.20+
+- Go 1.23+
 - MQTT broker (for testing)
 
 ## Environment Setup
