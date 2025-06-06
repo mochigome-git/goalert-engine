@@ -64,6 +64,11 @@ func NewRuleManager(ctx context.Context, rules []AlertRule, cfg config.Config, i
 	// Initialize default cooldown periods if not set
 	for i := range rm.Rules {
 		rule := &rm.Rules[i]
+
+		if rule.logger == nil {
+			rule.logger = logger
+		}
+
 		if rm.Rules[i].CooldownPeriod == 0 {
 			switch rm.Rules[i].getMaxLevel() {
 			case LevelCritical:
