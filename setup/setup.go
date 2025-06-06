@@ -68,7 +68,7 @@ func InitializeServices(
 	}
 
 	if len(rules) == 0 {
-		return nil, nil, errors.New("no rules found")
+		logger.Warn("no rules found, continuing with empty rule set")
 	}
 
 	manager := alert.NewRuleManager(ctx, rules, cfg, inserter, logger)

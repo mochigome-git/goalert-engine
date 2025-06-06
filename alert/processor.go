@@ -32,7 +32,7 @@ type AlertInserter interface {
 type RuleManager struct {
 	Rules          []AlertRule
 	Cfg            config.Config
-	ruleChans      map[int]chan struct{}
+	ruleChans      map[string]chan struct{}
 	deviceCache    map[cacheKey]cachedValue // Store values with timestamps
 	mu             sync.RWMutex             // Use RWMutex for better read performance
 	cacheTTL       time.Duration            // How long values stay in cache
@@ -54,7 +54,7 @@ func NewRuleManager(ctx context.Context, rules []AlertRule, cfg config.Config, i
 		deviceCache:    make(map[cacheKey]cachedValue),
 		lastAlertTimes: make(map[string]time.Time),
 		alertCounts:    make(map[string]int),
-		ruleChans:      make(map[int]chan struct{}),
+		ruleChans:      make(map[string]chan struct{}),
 		alertInserter:  inserter,
 		ctx:            ctx,
 		cancel:         cancel,
@@ -141,7 +141,7 @@ func (m *RuleManager) HandleMQTTMessage(topic string, payload []byte, cfg config
 		if slices.Contains(rule.Topics, topic) {
 			ch, ok := m.ruleChans[rule.ID]
 			if !ok {
-				m.logger.Warn("Rule channel missing", zap.Int("ruleID", rule.ID))
+				m.logger.Warn("Rule channel missing", zap.String("ruleID", rule.ID))
 				continue
 			}
 			select {
@@ -164,8 +164,9 @@ func (m *RuleManager) evaluateRule(rule *AlertRule, cfg config.Config) {
 
 		for _, condition := range rule.Conditions {
 			triggered, message := rule.Evaluate(snapshot, condition)
+
 			if triggered {
-				alertKey := fmt.Sprintf("%d_%d", rule.ID, condition.Level)
+				alertKey := fmt.Sprintf("%s_%d", rule.ID, condition.Level)
 
 				if m.shouldTriggerAlert(alertKey, condition.Level) {
 					m.logger.Info(
@@ -232,13 +233,13 @@ func (m *RuleManager) UpdateRules(newRules []AlertRule, cfg config.Config) {
 
 	// Reset everything from scratch
 	m.Rules = newRules
-	m.ruleChans = make(map[int]chan struct{})
+	m.ruleChans = make(map[string]chan struct{})
 
 	// Start a worker for each new rule
-	for _, r := range newRules {
+	for i := range newRules {
 		ch := make(chan struct{}, 1)
-		m.ruleChans[r.ID] = ch
-		go m.ruleWorker(&r, ch, cfg)
+		m.ruleChans[newRules[i].ID] = ch
+		go m.ruleWorker(&newRules[i], ch, cfg)
 	}
 
 	m.logger.Info("Rules updated and workers restarted", zap.Int("count", len(newRules)))
@@ -248,7 +249,7 @@ func (m *RuleManager) ruleWorker(rule *AlertRule, triggerChan chan struct{}, cfg
 	for {
 		select {
 		case <-m.ctx.Done():
-			m.logger.Info("Shutting down rule worker", zap.Int("ruleID", rule.ID))
+			m.logger.Info("Shutting down rule worker", zap.String("ruleID", rule.ID))
 			return
 		case <-triggerChan:
 			m.evaluateRule(rule, cfg)

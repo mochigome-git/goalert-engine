@@ -19,7 +19,7 @@ const (
 )
 
 type AlertRule struct {
-	ID             int               `json:"id"`
+	ID             string            `json:"id"`
 	Topics         []string          `json:"topics"`
 	Table          string            `json:"table"`
 	Field          string            `json:"field"`
@@ -33,24 +33,26 @@ type AlertRule struct {
 }
 
 type AlertCondition struct {
-	ID              int    `json:"id"`
-	Device          string `json:"device"`
-	Operator        string `json:"operator"`
-	Threshold       int    `json:"threshold"`
-	MessageTemplate string `json:"message_template"`
-	Level           int    `json:"level"` // 1=Warning, 2=Error, 3=Critical
+	ID              int      `json:"id"`
+	Device          string   `json:"device"`
+	Operator        string   `json:"operator"`
+	Threshold       int      `json:"threshold"`
+	Unit            []string `json:"unit"`
+	MessageTemplate string   `json:"message_template"`
+	Level           int      `json:"level"` // 1=Warning, 2=Error, 3=Critical
 }
 
 type AlertMessage struct {
-	Device    string  `json:"device"`
-	Current   float64 `json:"current"`
-	Threshold float64 `json:"threshold"`
-	Message   string  `json:"message"`
+	Device    string   `json:"device"`
+	Current   float64  `json:"current"`
+	Threshold float64  `json:"threshold"`
+	Message   string   `json:"message"`
+	Unit      []string `json:"unit"`
 	Severity  string
 }
 
 // NewAlertRule is used to create a new AlertRule with the given parameters.
-func NewAlertRule(id int, topics []string, table, field, category, machine string, conditions []AlertCondition, logger *zap.Logger) *AlertRule {
+func NewAlertRule(id string, topics []string, table, field, category, machine string, conditions []AlertCondition, logger *zap.Logger) *AlertRule {
 	return &AlertRule{
 		ID:             id,
 		Topics:         topics,
@@ -59,7 +61,7 @@ func NewAlertRule(id int, topics []string, table, field, category, machine strin
 		Category:       category,
 		Conditions:     conditions,
 		Machine:        machine,
-		LastAlertTime:  make(map[int]time.Time), // Ensure map initialization here
+		LastAlertTime:  make(map[int]time.Time), // Ensure map initialization
 		CooldownPeriod: 30 * time.Second,        // For immediate issues
 		logger:         logger,
 	}
@@ -127,7 +129,10 @@ func (r *AlertRule) evaluateConditions(deviceValues map[string]float64) (bool, s
 			}
 		} else {
 			// Simple condition
-			if r.checkSimpleCondition(condition, deviceValues) {
+			// if r.checkSimpleCondition(condition, deviceValues) {
+			// 	return true, condition.Device
+			// }
+			if r.evaluateComplexCondition(condition.Operator, deviceValues) {
 				return true, condition.Device
 			}
 		}
@@ -234,10 +239,13 @@ func (r *AlertRule) evaluateSingleCondition(condition string, values map[string]
 // checkCondition evaluates a simple condition based on the operator and threshold
 func (r *AlertRule) checkSimpleCondition(condition AlertCondition, values map[string]float64) bool {
 	val, exists := values[condition.Device]
+
 	if !exists {
 		return false
 	}
 	threshold := float64(condition.Threshold)
+
+	fmt.Println(condition.Operator)
 
 	switch condition.Operator {
 	case ">":
@@ -285,6 +293,7 @@ func (r *AlertRule) generateAlertMessage(condition AlertCondition, value float64
 		Current:   math.Round(value),
 		Threshold: math.Round(float64(condition.Threshold)),
 		Message:   condition.MessageTemplate,
+		Unit:      condition.Unit,
 		Severity:  getLevelString(condition.Level),
 	}
 

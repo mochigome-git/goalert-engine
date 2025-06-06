@@ -16,7 +16,7 @@ import (
 func TestNewRuleManager(t *testing.T) {
 	rules := []AlertRule{
 		{
-			ID:             1,
+			ID:             "3d5df7e3-5ac8-42b8-ae79-4a54cf7e90e7",
 			Topics:         []string{"topic1"},
 			Table:          "alerts",
 			CooldownPeriod: 0, // Should be set automatically
@@ -48,7 +48,7 @@ func TestHandleMQTTMessage(t *testing.T) {
 	logger := zap.NewNop()
 	rules := []AlertRule{
 		{
-			ID:     1,
+			ID:     "3d5df7e3-5ac8-42b8-ae79-4a54cf7e90e7",
 			Topics: []string{"sensor/device1"},
 			Table:  "alerts",
 			Conditions: []AlertCondition{
@@ -126,7 +126,7 @@ func TestEvaluateRule(t *testing.T) {
 
 	rules := []AlertRule{
 		{
-			ID:     1,
+			ID:     "3d5df7e3-5ac8-42b8-ae79-4a54cf7e90e7",
 			Topics: []string{"sensor/device1", "sensor/device2"},
 			Table:  "alerts",
 			Conditions: []AlertCondition{
@@ -231,7 +231,7 @@ func TestAlertCooldownBackoff(t *testing.T) {
 func TestCreateRuleSnapshot(t *testing.T) {
 	rules := []AlertRule{
 		{
-			ID:     1,
+			ID:     "3d5df7e3-5ac8-42b8-ae79-4a54cf7e90e7",
 			Topics: []string{"sensor/device1", "sensor/device2"},
 			Conditions: []AlertCondition{
 				{

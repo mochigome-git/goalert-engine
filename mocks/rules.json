@@ -11,6 +11,7 @@
         "device": "D800",
         "operator": "<",
         "threshold": 1000,
+        "unit": "℃",
         "message_template": "is below",
         "level": 1
       }
@@ -32,6 +33,7 @@
         "device": "D800",
         "operator": "D800 < 900 AND D392 == D166 AND D166 != 0",
         "threshold": 900,
+        "unit": "℃",
         "message_template": "is below",
         "level": 3
       }
@@ -53,6 +55,7 @@
         "device": "D808",
         "operator": "D808 > 600 AND D392 == D166 AND D166 != 0",
         "threshold": 600,
+        "unit": "℃",
         "message_template": "is Higher",
         "level": 2
       }

@@ -18,10 +18,13 @@ type Config struct {
 	TLSClientKey  string // Client private key as a string (PEM format)
 
 	Supabase struct {
-		URL    string
-		Key    string
-		Table  string
-		Schema string
+		URL             string
+		Key             string
+		Table           string
+		Schema          string
+		ForeignKey      string
+		ForeignKeyCheck string
+		Realtime        string
 	}
 }
 
@@ -46,15 +49,21 @@ func Load() Config {
 		TLSClientCert: os.Getenv("TLS_CLIENT_CERT"),
 		TLSClientKey:  os.Getenv("TLS_CLIENT_KEY"),
 		Supabase: struct {
-			URL    string
-			Key    string
-			Table  string
-			Schema string
+			URL             string
+			Key             string
+			Table           string
+			Schema          string
+			ForeignKey      string
+			ForeignKeyCheck string
+			Realtime        string
 		}{
-			URL:    os.Getenv("SUPABASE_URL"),
-			Key:    os.Getenv("SUPABASE_KEY"),
-			Table:  os.Getenv("SUPABASE_RULES_TABLE"),
-			Schema: schema,
+			URL:             os.Getenv("SUPABASE_URL"),
+			Key:             os.Getenv("SUPABASE_KEY"),
+			Table:           os.Getenv("SUPABASE_RULES_TABLE"),
+			Schema:          schema,
+			ForeignKey:      os.Getenv("SUPABASE_RULES_FK"),
+			ForeignKeyCheck: os.Getenv("SUPABASE_RULES_FK_EQ"),
+			Realtime:        os.Getenv("SUPABASE_REALTIME_TABLE"),
 		},
 	}
 }

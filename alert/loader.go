@@ -20,20 +20,22 @@ import (
 )
 
 type SupabaseRuleLoader struct {
-	client     *supabase.Client
-	cache      *ristretto.Cache
-	ttl        time.Duration
-	TableName  string
-	logger     *zap.Logger
-	realtime   *realtime.Client
-	projectRef string
-	schema     string
+	client            *supabase.Client
+	cache             *ristretto.Cache
+	ttl               time.Duration
+	TableName         string
+	logger            *zap.Logger
+	realtime          *realtime.Client
+	projectRef        string
+	schema            string
+	ForeignKey        string
+	ForeignKeyCheck   string
+	RealtimeTableName string
 }
 
 func NewSupabaseRuleLoader(cfg config.Config, logger *zap.Logger) (*SupabaseRuleLoader, error) {
 	apiURL := cfg.Supabase.URL
 	apiKey := cfg.Supabase.Key
-	tableName := cfg.Supabase.Table
 	schema := cfg.Supabase.Schema
 
 	// Extract project reference from URL
@@ -67,14 +69,17 @@ func NewSupabaseRuleLoader(cfg config.Config, logger *zap.Logger) (*SupabaseRule
 	}
 
 	return &SupabaseRuleLoader{
-		client:     client,
-		cache:      cache,
-		ttl:        5 * time.Minute,
-		TableName:  tableName,
-		logger:     logger,
-		realtime:   rtClient,
-		projectRef: projectRef,
-		schema:     schema,
+		client:            client,
+		cache:             cache,
+		ttl:               5 * time.Minute,
+		logger:            logger,
+		realtime:          rtClient,
+		projectRef:        projectRef,
+		schema:            schema,
+		TableName:         cfg.Supabase.Table,
+		RealtimeTableName: cfg.Supabase.Realtime,
+		ForeignKey:        cfg.Supabase.ForeignKey,
+		ForeignKeyCheck:   cfg.Supabase.ForeignKeyCheck,
 	}, nil
 }
 
@@ -82,7 +87,7 @@ func (s *SupabaseRuleLoader) WatchChanges(ctx context.Context, onUpdate func([]A
 	// Subscribe to PostgreSQL changes directly
 	err := s.realtime.ListenToPostgresChanges(realtime.PostgresChangesOptions{
 		Schema: s.schema,
-		Table:  s.TableName,
+		Table:  s.RealtimeTableName,
 		Filter: "*", // Listen to all changes
 	}, func(payload map[string]any) {
 		s.logger.Info("Database change detected",
@@ -160,7 +165,7 @@ func (s *SupabaseRuleLoader) GetRules() ([]AlertRule, error) {
 
 func (s *SupabaseRuleLoader) loadFromSupabase() ([]AlertRule, error) {
 	var dbRules []struct {
-		ID         int              `json:"id"`
+		ID         string           `json:"id"`
 		Topics     []string         `json:"topics"`
 		Table      string           `json:"table"`
 		Field      string           `json:"field"`
@@ -169,7 +174,11 @@ func (s *SupabaseRuleLoader) loadFromSupabase() ([]AlertRule, error) {
 		Conditions []AlertCondition `json:"conditions"`
 	}
 
-	_, err := s.client.From(s.TableName).Select("*", "", false).ExecuteTo(&dbRules)
+	_, err := s.client.
+		From(s.TableName).
+		Select(s.ForeignKey, "", false).
+		Eq(fmt.Sprintf("%s.%s", s.RealtimeTableName, s.ForeignKeyCheck), "true").
+		ExecuteTo(&dbRules)
 	if err != nil {
 		return nil, fmt.Errorf("supabase query failed: %w", err)
 	}
@@ -206,7 +215,7 @@ func LoadRulesFromFile(path string, logger *zap.Logger) []AlertRule {
 	}
 
 	var fileRules []struct {
-		ID             int              `json:"id"`
+		ID             string           `json:"id"`
 		Topics         []string         `json:"topics"`
 		Table          string           `json:"table"`
 		Field          string           `json:"field"`

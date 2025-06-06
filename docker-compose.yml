@@ -1,0 +1,20 @@
+
+services:
+  goalert-engine:
+    image: goalert-engine:0.1v
+    container_name: goalert-engine
+    restart: unless-stopped
+    environment:
+      MQTT_BROKER: ${MQTT_BROKER}
+      MQTT_TOPIC: ${MQTT_TOPIC}
+      TLS_CA_CERT: ${TLS_CA_CERT}
+      TLS_CLIENT_CERT: ${TLS_CLIENT_CERT}
+      TLS_CLIENT_KEY: ${TLS_CLIENT_KEY}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_KEY: ${SUPABASE_KEY}
+      SUPABASE_PASSWORD: ${SUPABASE_PASSWORD}
+      SUPABASE_SCHEMA: ${SUPABASE_SCHEMA}
+      SUPABASE_RULES_TABLE: ${SUPABASE_RULES_TABLE}
+      SUPABASE_RULES_FK: ${SUPABASE_RULES_FK}
+      SUPABASE_RULES_FK_EQ: ${SUPABASE_RULES_FK_EQ}
+      SUPABASE_REALTIME_TABLE: ${SUPABASE_REALTIME_TABLE}
