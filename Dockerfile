@@ -27,7 +27,6 @@ COPY --from=builder /build/goalert-engine .
 CMD ["./goalert-engine"]
 
 
-
 # Build Image with command
 # docker build --no-cache -t goalert-engine:${version} .
 # docker tag goalert-engine:${version} mochigome/goalert-engine:${version}

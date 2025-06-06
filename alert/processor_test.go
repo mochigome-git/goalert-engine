@@ -124,9 +124,12 @@ func TestEvaluateRule(t *testing.T) {
 		},
 	}
 
+	logger := zaptest.NewLogger(t)
+
 	rules := []AlertRule{
 		{
 			ID:     "3d5df7e3-5ac8-42b8-ae79-4a54cf7e90e7",
+			logger: logger,
 			Topics: []string{"sensor/device1", "sensor/device2"},
 			Table:  "alerts",
 			Conditions: []AlertCondition{
@@ -157,7 +160,6 @@ func TestEvaluateRule(t *testing.T) {
 	}
 
 	cfg := config.Config{}
-	logger := zaptest.NewLogger(t)
 	rm := NewRuleManager(context.Background(), rules, cfg, mockClient, logger)
 
 	// Prime the cache with values
