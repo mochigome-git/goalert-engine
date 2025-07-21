@@ -28,7 +28,8 @@ CMD ["./goalert-engine"]
 
 
 # Build Image with command
-# docker build --no-cache -t goalert-engine:${version} .
-# docker tag goalert-engine:${version} mochigome/goalert-engine:${version}
-# docker push mochigome/goalert-engine:tagname
+# docker build --no-cache -t goalert-engine:0.2v .
+# docker tag goalert-engine:0.2v mochigome/goalert-engine:0.2v
+# docker push mochigome/goalert-engine:0.2v
 
+# current version: 0.2v

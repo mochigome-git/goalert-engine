@@ -91,7 +91,7 @@ func NewRuleManager(ctx context.Context, rules []AlertRule, cfg config.Config, i
 func (m *RuleManager) HandleMQTTMessage(topic string, payload []byte, cfg config.Config) {
 	var msg map[string]any
 	if err := json.Unmarshal(payload, &msg); err != nil {
-		m.logger.Error("Failed to parse payload", zap.Error(err))
+		//m.logger.Error("Failed to parse payload", zap.Error(err))
 		return
 	}
 
