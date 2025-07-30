@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	version = "dev"
+	version = "0.2v"
 )
 
 func main() {

@@ -1,5 +1,5 @@
 # Stage 1: Build the Go program
-FROM golang:1.24.3-alpine AS builder
+FROM golang:1.24.5-alpine3.22 AS builder
 WORKDIR /build
 
 # Install build dependencies
