@@ -3,6 +3,9 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -10,12 +13,15 @@ import (
 type Config struct {
 	MQTTBroker    string
 	MQTTTopic     string
-	SupabaseURL   string // Supabase API endpoint's URL
-	SupabaseKey   string // Supabase Service Role Key
-	Schema        string // Supabase Custom Schema
-	TLSCACert     string // TLS CA certificate as a string (PEM format)
-	TLSClientCert string // Client certificate as a string (PEM format)
-	TLSClientKey  string // Client private key as a string (PEM format)
+	MQTTUsername  string
+	MQTTPassword  string
+	MQTTClientID  string
+	SupabaseURL   string
+	SupabaseKey   string
+	Schema        string
+	TLSCACert     string
+	TLSClientCert string
+	TLSClientKey  string
 
 	Supabase struct {
 		URL             string
@@ -29,41 +35,95 @@ type Config struct {
 }
 
 func Load() Config {
-	// Optional fallback: try to load .env.local
-	if err := godotenv.Load(".env.local"); err != nil {
-		fmt.Println("Info: .env.local not found, using system environment variables")
+	// Try multiple locations for .env.local so it works whether you run
+	// via `go run ./...` (cwd = project root) or as a compiled binary
+	// (cwd = wherever the binary is).
+	candidates := []string{
+		".env.local",
+		".env",
 	}
 
-	schema := os.Getenv("SUPABASE_SCHEMA")
-	if schema == "" {
-		schema = "public"
+	// Also try the directory of the source file (dev only)
+	_, filename, _, ok := runtime.Caller(0)
+	if ok {
+		dir := filepath.Dir(filename)
+		candidates = append(candidates,
+			filepath.Join(dir, "../../.env.local"),
+			filepath.Join(dir, "../../.env"),
+		)
 	}
 
-	return Config{
-		MQTTBroker:    os.Getenv("MQTT_BROKER"),
-		MQTTTopic:     os.Getenv("MQTT_TOPIC"),
-		SupabaseURL:   os.Getenv("SUPABASE_URL"),
-		SupabaseKey:   os.Getenv("SUPABASE_KEY"),
+	loaded := false
+	for _, path := range candidates {
+		if err := godotenv.Load(path); err == nil {
+			fmt.Printf("Info: loaded env from %s\n", path)
+			loaded = true
+			break
+		}
+	}
+	if !loaded {
+		fmt.Println("Info: no .env.local or .env found — using system environment variables")
+	}
+
+	schema := getenv("SUPABASE_SCHEMA", "alerts")
+
+	cfg := Config{
+		MQTTBroker:    getenv("MQTT_BROKER", ""),
+		MQTTTopic:     getenv("MQTT_TOPIC", "#"),
+		MQTTUsername:  getenv("MQTT_USERNAME", ""),
+		MQTTPassword:  getenv("MQTT_PASSWORD", ""),
+		MQTTClientID:  getenv("MQTT_CLIENT_ID", ""),
+		SupabaseURL:   getenv("SUPABASE_URL", ""),
+		SupabaseKey:   getenv("SUPABASE_KEY", ""),
 		Schema:        schema,
-		TLSCACert:     os.Getenv("TLS_CA_CERT"),
-		TLSClientCert: os.Getenv("TLS_CLIENT_CERT"),
-		TLSClientKey:  os.Getenv("TLS_CLIENT_KEY"),
-		Supabase: struct {
-			URL             string
-			Key             string
-			Table           string
-			Schema          string
-			ForeignKey      string
-			ForeignKeyCheck string
-			Realtime        string
-		}{
-			URL:             os.Getenv("SUPABASE_URL"),
-			Key:             os.Getenv("SUPABASE_KEY"),
-			Table:           os.Getenv("SUPABASE_RULES_TABLE"),
-			Schema:          schema,
-			ForeignKey:      os.Getenv("SUPABASE_RULES_FK"),
-			ForeignKeyCheck: os.Getenv("SUPABASE_RULES_FK_EQ"),
-			Realtime:        os.Getenv("SUPABASE_REALTIME_TABLE"),
-		},
+		TLSCACert:     loadCert("TLS_CA_CERT"),
+		TLSClientCert: loadCert("TLS_CLIENT_CERT"),
+		TLSClientKey:  loadCert("TLS_CLIENT_KEY"),
 	}
+
+	cfg.Supabase.URL = cfg.SupabaseURL
+	cfg.Supabase.Key = cfg.SupabaseKey
+	cfg.Supabase.Table = getenv("SUPABASE_RULES_TABLE", "alert_rules")
+	cfg.Supabase.Schema = schema
+	cfg.Supabase.ForeignKey = getenv("SUPABASE_RULES_FK", "*")
+	cfg.Supabase.ForeignKeyCheck = getenv("SUPABASE_RULES_FK_EQ", "")
+	cfg.Supabase.Realtime = getenv("SUPABASE_REALTIME_TABLE", "model_group")
+
+	return cfg
+}
+
+// getenv reads an env var and strips surrounding quotes so both
+// quoted (.env.local style) and unquoted (system env) values work.
+func getenv(key, fallback string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	if len(v) >= 2 {
+		if (v[0] == '"' && v[len(v)-1] == '"') ||
+			(v[0] == '\'' && v[len(v)-1] == '\'') {
+			v = v[1 : len(v)-1]
+		}
+	}
+	return v
+}
+
+// loadCert supports two formats:
+//
+//	File path   — TLS_CA_CERT=/path/to/ca.pem   (recommended)
+//	Inline PEM  — TLS_CA_CERT=-----BEGIN CERTIFICATE-----\n...
+func loadCert(key string) string {
+	v := getenv(key, "")
+	if v == "" {
+		return ""
+	}
+	// Looks like a file path (no PEM header, no newlines)
+	if !strings.Contains(v, "BEGIN") && !strings.Contains(v, "\n") {
+		data, err := os.ReadFile(v)
+		if err == nil {
+			return string(data)
+		}
+		fmt.Printf("Warning: %s value %q looks like a path but could not be read: %v\n", key, v, err)
+	}
+	return v
 }

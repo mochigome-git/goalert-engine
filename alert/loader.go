@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"goalert-engine/realtime" // Import your realtime package
+	"goalert-engine/realtime"
 
 	"github.com/dgraph-io/ristretto"
 	"github.com/supabase-community/supabase-go"
@@ -34,12 +34,7 @@ type SupabaseRuleLoader struct {
 }
 
 func NewSupabaseRuleLoader(cfg config.Config, logger *zap.Logger) (*SupabaseRuleLoader, error) {
-	apiURL := cfg.Supabase.URL
-	apiKey := cfg.Supabase.Key
-	schema := cfg.Supabase.Schema
-
-	// Extract project reference from URL
-	u, err := url.Parse(apiURL)
+	u, err := url.Parse(cfg.Supabase.URL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse Supabase URL: %w", err)
 	}
@@ -54,16 +49,14 @@ func NewSupabaseRuleLoader(cfg config.Config, logger *zap.Logger) (*SupabaseRule
 		return nil, fmt.Errorf("failed to initialize cache: %w", err)
 	}
 
-	client, err := supabase.NewClient(apiURL, apiKey, &supabase.ClientOptions{
-		Schema: schema,
+	client, err := supabase.NewClient(cfg.Supabase.URL, cfg.Supabase.Key, &supabase.ClientOptions{
+		Schema: cfg.Supabase.Schema,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize Supabase client: %w", err)
 	}
 
-	rtClient := realtime.CreateRealtimeClient(projectRef, apiKey, logger)
-
-	// Connect the realtime client
+	rtClient := realtime.CreateRealtimeClient(projectRef, cfg.Supabase.Key, logger)
 	if err := rtClient.Connect(); err != nil {
 		return nil, fmt.Errorf("failed to connect to realtime service: %w", err)
 	}
@@ -75,7 +68,7 @@ func NewSupabaseRuleLoader(cfg config.Config, logger *zap.Logger) (*SupabaseRule
 		logger:            logger,
 		realtime:          rtClient,
 		projectRef:        projectRef,
-		schema:            schema,
+		schema:            cfg.Supabase.Schema,
 		TableName:         cfg.Supabase.Table,
 		RealtimeTableName: cfg.Supabase.Realtime,
 		ForeignKey:        cfg.Supabase.ForeignKey,
@@ -84,63 +77,45 @@ func NewSupabaseRuleLoader(cfg config.Config, logger *zap.Logger) (*SupabaseRule
 }
 
 func (s *SupabaseRuleLoader) WatchChanges(ctx context.Context, onUpdate func([]AlertRule)) error {
-	// Subscribe to PostgreSQL changes directly
-	err := s.realtime.ListenToPostgresChanges(realtime.PostgresChangesOptions{
-		Schema: s.schema,
-		Table:  s.RealtimeTableName,
-		Filter: "*", // Listen to all changes
-	}, func(payload map[string]any) {
-		s.logger.Info("Database change detected",
-			zap.Any("payload", payload))
-
-		// Extract change type and record
-		if data, ok := payload["payload"].(map[string]any); ok {
-			changeType, _ := data["type"].(string)
-
-			var record map[string]any
-
-			if r, ok := data["record"].(map[string]any); ok {
-				record = r
-			} else if or, ok := data["old_record"].(map[string]any); ok {
-				record = or
-			} else {
-				record = nil
-			}
-
-			s.logger.Debug("Change details",
-				zap.String("type", changeType),
-				zap.Any("record", record))
-
-			// Invalidate cache and reload rules on any change event
-			s.cache.Del("all_rules")
-			updatedRules, err := s.GetRules()
-			if err != nil {
-				s.logger.Error("Failed to reload rules after DB change", zap.Error(err))
-				return
-			}
-			onUpdate(updatedRules)
-		}
-
-		// Invalidate cache and reload rules
+	reload := func(source string) {
 		s.cache.Del("all_rules")
 		updatedRules, err := s.GetRules()
 		if err != nil {
-			s.logger.Error("Failed to reload rules", zap.Error(err))
+			s.logger.Error("Failed to reload rules", zap.String("source", source), zap.Error(err))
 			return
 		}
 		onUpdate(updatedRules)
-	})
-
-	if err != nil {
-		return fmt.Errorf("failed to listen to postgres changes: %w", err)
 	}
 
-	// Handle context cancellation
+	// Watch alert_rules — rule created/updated/deleted
+	err := s.realtime.ListenToPostgresChanges(realtime.PostgresChangesOptions{
+		Schema: s.schema,
+		Table:  "alert_rules",
+		Filter: "",
+	}, func(payload map[string]any) {
+		s.logger.Info("alert_rules changed — reloading rules")
+		reload("alert_rules")
+	})
+	if err != nil {
+		return fmt.Errorf("failed to watch alert_rules: %w", err)
+	}
+
+	// Watch model_group — enabled toggle fires here
+	err = s.realtime.ListenToPostgresChanges(realtime.PostgresChangesOptions{
+		Schema: s.schema,
+		Table:  "model_group",
+		Filter: "",
+	}, func(payload map[string]any) {
+		s.logger.Info("model_group changed — reloading rules")
+		reload("model_group")
+	})
+	if err != nil {
+		return fmt.Errorf("failed to watch model_group: %w", err)
+	}
+
 	go func() {
 		<-ctx.Done()
-		s.logger.Info("Stopping realtime changes watcher")
-		// The connection will be closed when the client is garbage collected
-		// or you can explicitly call s.realtime.Disconnect() if needed
+		s.logger.Info("Stopping realtime watcher")
 	}()
 
 	return nil
@@ -149,6 +124,7 @@ func (s *SupabaseRuleLoader) WatchChanges(ctx context.Context, onUpdate func([]A
 func (s *SupabaseRuleLoader) GetRules() ([]AlertRule, error) {
 	if val, ok := s.cache.Get("all_rules"); ok {
 		if rules, ok := val.([]AlertRule); ok {
+			s.logger.Info("Rules loaded from cache", zap.Int("count", len(rules)))
 			return rules, nil
 		}
 		return nil, errors.New("invalid cache type")
@@ -159,40 +135,54 @@ func (s *SupabaseRuleLoader) GetRules() ([]AlertRule, error) {
 		return nil, fmt.Errorf("failed to load rules: %w", err)
 	}
 
+	s.logger.Info("Rules loaded from Supabase", zap.Int("count", len(rules)))
 	s.cache.SetWithTTL("all_rules", rules, 1, s.ttl)
 	return rules, nil
 }
 
 func (s *SupabaseRuleLoader) loadFromSupabase() ([]AlertRule, error) {
+	// Only load rules that belong to an ENABLED model group.
+	// Join: alert_rules → model_group_rules → model_group (enabled = true)
 	var dbRules []struct {
 		ID         string           `json:"id"`
+		TenantID   string           `json:"tenant_id"`
+		DeviceID   string           `json:"device_id"`
 		Topics     []string         `json:"topics"`
 		Table      string           `json:"table"`
 		Field      string           `json:"field"`
 		Category   string           `json:"category"`
-		Machine    string           `json:"machine"`
+		Device     string           `json:"device"`
 		Conditions []AlertCondition `json:"conditions"`
 	}
 
 	_, err := s.client.
 		From(s.TableName).
-		Select(s.ForeignKey, "", false).
-		Eq(fmt.Sprintf("%s.%s", s.RealtimeTableName, s.ForeignKeyCheck), "true").
+		Select("*, model_group_rules!inner(*), model_group!inner(*)", "", false).
+		Eq("model_group.enabled", "true").
 		ExecuteTo(&dbRules)
 	if err != nil {
+		s.logger.Error("Supabase query failed",
+			zap.String("table", s.TableName),
+			zap.String("schema", s.schema),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("supabase query failed: %w", err)
 	}
 
+	s.logger.Info("Fetched rules from DB", zap.Int("count", len(dbRules)))
+
 	rules := make([]AlertRule, len(dbRules))
-	for i, dbRule := range dbRules {
+	for i, r := range dbRules {
 		rules[i] = *NewAlertRule(
-			dbRule.ID,
-			dbRule.Topics,
-			dbRule.Table,
-			dbRule.Field,
-			dbRule.Category,
-			dbRule.Machine,
-			dbRule.Conditions,
+			r.ID,
+			r.TenantID,
+			r.DeviceID,
+			r.Topics,
+			r.Table,
+			r.Field,
+			r.Category,
+			r.Device,
+			r.Conditions,
 			s.logger,
 		)
 	}
@@ -200,7 +190,6 @@ func (s *SupabaseRuleLoader) loadFromSupabase() ([]AlertRule, error) {
 	return rules, nil
 }
 
-// Close cleans up resources
 func (s *SupabaseRuleLoader) Close() error {
 	if s.realtime != nil {
 		return s.realtime.Disconnect()
@@ -215,34 +204,24 @@ func LoadRulesFromFile(path string, logger *zap.Logger) []AlertRule {
 	}
 
 	var fileRules []struct {
-		ID             string           `json:"id"`
-		Topics         []string         `json:"topics"`
-		Table          string           `json:"table"`
-		Field          string           `json:"field"`
-		Category       string           `json:"category"`
-		Machine        string           `json:"machine"`
-		Conditions     []AlertCondition `json:"conditions"`
-		ThrottlePeriod int              `json:"throttle_period"`
+		ID         string           `json:"id"`
+		TenantID   string           `json:"tenant_id"`
+		DeviceID   string           `json:"device_id"`
+		Topics     []string         `json:"topics"`
+		Table      string           `json:"table"`
+		Field      string           `json:"field"`
+		Category   string           `json:"category"`
+		Device     string           `json:"device"`
+		Conditions []AlertCondition `json:"conditions"`
 	}
 
 	if err := json.Unmarshal(data, &fileRules); err != nil {
 		log.Fatalf("Failed to unmarshal rules: %v", err)
 	}
 
-	// Convert to proper AlertRule with initialization
 	rules := make([]AlertRule, len(fileRules))
-	for i, fileRule := range fileRules {
-		rules[i] = *NewAlertRule(
-			fileRule.ID,
-			fileRule.Topics,
-			fileRule.Table,
-			fileRule.Field,
-			fileRule.Category,
-			fileRule.Machine,
-			fileRule.Conditions,
-			logger,
-		)
+	for i, r := range fileRules {
+		rules[i] = *NewAlertRule(r.ID, r.TenantID, r.DeviceID, r.Topics, r.Table, r.Field, r.Category, r.Device, r.Conditions, logger)
 	}
-
 	return rules
 }

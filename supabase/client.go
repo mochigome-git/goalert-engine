@@ -10,35 +10,50 @@ import (
 	"time"
 )
 
-// SupabaseInserter wraps the package-level InsertAlert function
-// to implement the alert.AlertInserter interface
+// SupabaseInserter implements alert.AlertInserter
 type SupabaseInserter struct{}
 
-func (s *SupabaseInserter) InsertAlert(cfg config.Config, table, device, message, category, machine string) error {
-	return InsertAlert(cfg, table, device, message, category, machine)
+func (s *SupabaseInserter) InsertAlert(cfg config.Config, table, device, message, category, deviceLabel string) error {
+	return InsertAlert(cfg, table, device, message, category, deviceLabel)
 }
 
-// Shared client with connection pooling
 var httpClient = &http.Client{
 	Timeout: 10 * time.Second,
 	Transport: &http.Transport{
 		MaxIdleConns:        100,
 		IdleConnTimeout:     90 * time.Second,
-		DisableCompression:  false,
 		MaxIdleConnsPerHost: 100,
 	},
 }
 
-func InsertAlert(cfg config.Config, table, deviceID, message, category, machine string) error {
-	// Construct REST API endpoint URL
+// InsertAlert writes one row to alerts.logs.
+//
+// alerts.logs schema:
+//
+//	uuid        uuid  (auto)
+//	created_at  timestamptz (auto)
+//	device_id   text  — the field name that triggered (e.g. "energy_reactive_total_kvarh")
+//	message     jsonb — parsed from the JSON alert message string
+//	category    text  — rule.Category
+//	device      text  — rule.Device (device label/name, was "machine")
+func InsertAlert(cfg config.Config, table, device, message, category, deviceLabel string) error {
+	// alerts schema is fixed — cfg.Schema is typically "public" and must not be used here
+	const alertSchema = "alerts"
+
 	url := fmt.Sprintf("%s/rest/v1/%s", cfg.SupabaseURL, table)
 
-	// Prepare request body
+	// message is a JSON string — unmarshal so Supabase stores it as jsonb,
+	// not as a double-encoded string like "\"{ \\\"device\\\": ... }\""
+	var messageJSON any
+	if err := json.Unmarshal([]byte(message), &messageJSON); err != nil {
+		messageJSON = map[string]string{"raw": message}
+	}
+
 	requestBody := map[string]any{
-		"device_id": deviceID,
-		"message":   message,
+		"device_id": device,      // field name / condition identifier
+		"message":   messageJSON, // jsonb
 		"category":  category,
-		"machine":   machine,
+		"device":    deviceLabel, // device label (column was named "device", not "machine")
 	}
 
 	body, err := json.Marshal(requestBody)
@@ -51,15 +66,12 @@ func InsertAlert(cfg config.Config, table, deviceID, message, category, machine 
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Set required headers
 	req.Header.Set("apikey", cfg.SupabaseKey)
 	req.Header.Set("Authorization", "Bearer "+cfg.SupabaseKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Prefer", "return=minimal")
-
-	// For private schemas (uncomment if needed)
-	req.Header.Set("Content-Profile", cfg.Schema)
-	req.Header.Set("Accept-Profile", cfg.Schema)
+	req.Header.Set("Content-Profile", alertSchema)
+	req.Header.Set("Accept-Profile", alertSchema)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -67,11 +79,9 @@ func InsertAlert(cfg config.Config, table, deviceID, message, category, machine 
 	}
 	defer resp.Body.Close()
 
-	// Always read the response body to allow connection reuse
 	bodyBytes, _ := io.ReadAll(resp.Body)
-
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("API error (%d): %s", resp.StatusCode, string(bodyBytes))
+		return fmt.Errorf("supabase insert error (%d): %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	return nil
