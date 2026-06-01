@@ -1,35 +1,36 @@
-# Stage 1: Build the Go program
-FROM golang:1.24.5-alpine3.22 AS builder
-WORKDIR /build
+# --- Stage 1: Build ---
+FROM golang:1.26.3-alpine AS builder
 
-# Install build dependencies
-RUN apk add --no-cache git gcc musl-dev
+# Accept platform args from buildx
+ARG TARGETOS
+ARG TARGETARCH
 
-# Copy only the dependency files first 
+# Configure Go environment for static build
+ENV CGO_ENABLED=0 \
+    GOOS=$TARGETOS \
+    GOARCH=$TARGETARCH
+
+WORKDIR /app
+
+# Cache dependencies first
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy the rest of the source code
+# Copy source code
 COPY . .
-RUN CGO_ENABLED=1 GOOS=linux go build -o goalert-engine .
 
-# Stage 2: Runtime image
-FROM alpine:latest
-RUN apk add --no-cache ca-certificates
+# Build the binary (adjust the main package path if needed)
+RUN go build -o main ./cmd/
 
-# Set working directory
+# --- Stage 2: Runtime ---
+FROM gcr.io/distroless/base-debian11
+
+# Copy built binary
+COPY --from=builder /app/main /app/main
+
+# Working directory and port
 WORKDIR /app
+EXPOSE 8080
 
-# Copy the binary from builder stage 
-COPY --from=builder /build/goalert-engine .
-
-# Command to run the application
-CMD ["./goalert-engine"]
-
-
-# Build Image with command
-# docker build --no-cache -t goalert-engine:0.2v .
-# docker tag goalert-engine:0.2v mochigome/goalert-engine:0.2v
-# docker push mochigome/goalert-engine:0.2v
-
-# current version: 0.2v
+# Run the app
+ENTRYPOINT ["/app/main"]

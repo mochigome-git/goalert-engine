@@ -164,13 +164,18 @@ func (m *RuleManager) HandleMQTTMessage(topic string, payload []byte, cfg config
 		return
 	}
 
-	if msg.DeviceID == "" {
-		m.logger.Warn("Payload missing device_id", zap.String("topic", topic))
-		return
+	// Topic format: telemetry/{tenant_id}/{device_id}/{category}
+	// Extract from topic as fallback if not in payload body
+	parts := strings.Split(topic, "/")
+	if msg.TenantID == "" && len(parts) >= 2 {
+		msg.TenantID = parts[1]
+	}
+	if msg.DeviceID == "" && len(parts) >= 3 {
+		msg.DeviceID = parts[2]
 	}
 
-	if msg.TenantID == "" {
-		m.logger.Warn("Payload missing tenant_id", zap.String("topic", topic))
+	if msg.DeviceID == "" {
+		m.logger.Warn("Cannot determine device_id", zap.String("topic", topic))
 		return
 	}
 
@@ -187,7 +192,7 @@ func (m *RuleManager) HandleMQTTMessage(topic string, payload []byte, cfg config
 
 	floatData, err := convertToFloat(flatData)
 	if err != nil {
-		m.logger.Warn("Partial payload conversion",
+		m.logger.Debug("Skipping non-numeric fields",
 			zap.String("device_id", msg.DeviceID),
 			zap.Error(err))
 	}

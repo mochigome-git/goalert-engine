@@ -16,9 +16,7 @@ import (
 )
 
 func InitLogger() *zap.Logger {
-	// Use development config temporarily to see debug logs
-	// Switch back to NewProductionConfig() once alert firing is confirmed
-	cfg := zap.NewDevelopmentConfig()
+	cfg := zap.NewProductionConfig()
 	cfg.EncoderConfig.TimeKey = ""
 	cfg.EncoderConfig.MessageKey = "message"
 	cfg.EncoderConfig.LevelKey = "severity"
